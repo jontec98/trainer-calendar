@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Training Calendar</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Training">
+<meta name="theme-color" content="#0f1115">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root {
+  --bg: #f5f6f8; --card: #ffffff; --ink: #14161a; --muted: #6b7280; --line: #e5e7eb;
+  --accent: #2563eb; --done: #16a34a; --miss: #dc2626; --today: #eef4ff;
+  --z1: #9ca3af; --z2: #3b82f6; --z3: #22c55e; --z4: #eab308; --z5: #f97316; --z6: #ef4444; --z7: #a855f7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115; --card: #181b21; --ink: #e8eaee; --muted: #9aa1ad; --line: #2a2f38;
+    --accent: #60a5fa; --done: #4ade80; --miss: #f87171; --today: #1b2433;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
+body { padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom); }
+header { position: sticky; top: 0; z-index: 5; background: var(--bg);
+  padding: 12px 16px 8px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+header h1 { font-size: 20px; margin: 0; flex: 1; }
+header .sub { font-size: 13px; color: var(--muted); font-weight: 400; }
+button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; width: 100%; padding: 12px; }
+main { max-width: 680px; margin: 0 auto; padding: 8px 16px 40px; }
+.week { margin: 18px 0 6px; display: flex; justify-content: space-between; align-items: baseline; }
+.week h2 { font-size: 15px; margin: 0; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.week .tot { font-size: 13px; color: var(--muted); }
+.day { display: flex; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line); }
+.day.today { background: var(--today); margin: 0 -16px; padding: 8px 16px; border-radius: 8px; }
+.date { width: 44px; flex: none; text-align: center; }
+.date .dow { font-size: 12px; color: var(--muted); text-transform: uppercase; }
+.date .dn { font-size: 20px; font-weight: 600; }
+.sessions { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.rest { color: var(--muted); font-size: 14px; padding-top: 10px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; }
+.card .t { font-weight: 600; font-size: 15px; display: flex; gap: 6px; align-items: flex-start; }
+.card .t span { flex: 1; }
+.meta { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.badge { font-size: 12px; font-weight: 600; border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+.badge.done { color: var(--done); border: 1px solid var(--done); }
+.badge.part { color: var(--z5); border: 1px solid var(--z5); }
+.badge.miss { color: var(--miss); border: 1px solid var(--miss); }
+svg.prof { display: block; width: 100%; height: 44px; margin-top: 8px; }
+.detail { display: none; margin-top: 10px; font-size: 14px; }
+.card.open .detail { display: block; }
+.card.open svg.prof { height: 90px; }
+.note { white-space: pre-wrap; margin: 0 0 10px; }
+.ride { background: var(--bg); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: 13px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+td { padding: 3px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+td.n { text-align: right; white-space: nowrap; }
+td .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+.login { max-width: 360px; margin: 60px auto; padding: 0 16px; }
+.login h1 { font-size: 24px; }
+.login input { width: 100%; font: inherit; padding: 12px; margin: 6px 0; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink); }
+.err { color: var(--miss); font-size: 14px; min-height: 20px; }
+.center { text-align: center; color: var(--muted); padding: 40px 0; }
+.more { display: block; width: 100%; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div id="app"><div class="center">Loading…</div></div>
+<script>
+"use strict";
+// Supabase project of the TrainerApp. The publishable key is a client key, meant to be public:
+// row-level security means a signed-in user only ever sees their own rows.
+const SB_URL = "https://tciawvasdfymnsfjrork.supabase.co";
+const SB_KEY = "sb_publishable_4p_7w7o37W-T586s5EcJSw_w2-4iSFY";
+const STORE = "tc.session";
+
+const app = document.getElementById("app");
+let session = null, scrolled = false, ftp = 250, weeksBack = 1, weeksAhead = 6;
+const openCards = new Set();
+
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem(STORE)); } catch { return null; } },
+  set(v) { try { v ? localStorage.setItem(STORE, JSON.stringify(v)) : localStorage.removeItem(STORE); } catch {} },
+};
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// ---------- Auth ----------
+async function auth(grant, body) {
+  const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=${grant}`, {
+    method: "POST", headers: { apikey: SB_KEY, "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error_description || j.msg || j.message || `HTTP ${r.status}`);
+  return { access: j.access_token, refresh: j.refresh_token, exp: Math.floor(Date.now() / 1000) + (j.expires_in || 3600) };
+}
+async function token() {
+  if (!session) throw new Error("signed out");
+  if (session.exp - 60 < Date.now() / 1000) { session = await auth("refresh_token", { refresh_token: session.refresh }); store.set(session); }
+  return session.access;
+}
+async function rest(path) {
+  const r = await fetch(`${SB_URL}/rest/v1/${path}`, { headers: { apikey: SB_KEY, Authorization: `Bearer ${await token()}` } });
+  if (r.status === 401) { signOut(); throw new Error("Session expired"); }
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+function signOut() { session = null; store.set(null); renderLogin(); }
+
+function renderLogin(msg = "") {
+  app.innerHTML = `<form class="login" id="f">
+    <h1>Training Calendar</h1>
+    <p class="meta">Sign in with your TrainerApp account.</p>
+    <input id="e" type="email" autocomplete="username" placeholder="Email" required>
+    <input id="p" type="password" autocomplete="current-password" placeholder="Password" required>
+    <div class="err" id="err">${esc(msg)}</div>
+    <button class="primary" type="submit">Sign in</button></form>`;
+  document.getElementById("f").onsubmit = async ev => {
+    ev.preventDefault();
+    const err = document.getElementById("err"); err.textContent = "Signing in…";
+    try {
+      session = await auth("password", { email: document.getElementById("e").value.trim(), password: document.getElementById("p").value });
+      store.set(session); load();
+    } catch (e) { err.textContent = /invalid/i.test(e.message) ? "Wrong email or password" : e.message; }
+  };
+}
+
+// ---------- Dates ----------
+const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const monday = d => addDays(new Date(d.getFullYear(), d.getMonth(), d.getDate()), -((d.getDay() + 6) % 7));
+const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function weekNo(d) { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day); const y = new Date(Date.UTC(t.getUTCFullYear(), 0, 1)); return Math.ceil(((t - y) / 864e5 + 1) / 7); }
+const hm = s => { s = Math.round(s / 60); const h = Math.floor(s / 60), m = s % 60; return h ? `${h}:${String(m).padStart(2, "0")} h` : `${m} min`; };
+const mmss = s => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+
+// ---------- Workout maths ----------
+const frac = p => (p <= 4 ? p : p / ftp);   // ≤ 4 = fraction of FTP, else watts
+function zoneColor(f) {
+  const z = f <= .55 ? 1 : f <= .75 ? 2 : f <= .90 ? 3 : f <= 1.05 ? 4 : f <= 1.20 ? 5 : f <= 1.50 ? 6 : 7;
+  return `var(--z${z})`;
+}
+// Segments [{t0, dur, f0, f1, note}] with ramps resolved.
+function segments(w) {
+  if (!Array.isArray(w.intervals)) return [];
+  let t = 0, prev = .5; const out = [];
+  for (const iv of w.intervals) {
+    const f1 = frac(Number(iv.power) || 0), f0 = iv.type === "ramp" ? prev : f1, dur = Number(iv.duration) || 0;
+    out.push({ t0: t, dur, f0, f1, note: iv.note || "", ramp: iv.type === "ramp" });
+    t += dur; prev = f1;
+  }
+  return out;
+}
+function stats(w) {
+  const seg = segments(w);
+  if (!seg.length) return { dur: w.duration_s || 0, tss: null, iF: null };
+  let dur = 0, p4 = 0;
+  for (const s of seg) {           // integrate f^4 (ramps: average over 8 sub-steps)
+    const n = s.ramp ? 8 : 1;
+    for (let i = 0; i < n; i++) { const f = s.f0 + (s.f1 - s.f0) * (i + .5) / n; p4 += f ** 4 * s.dur / n; }
+    dur += s.dur;
+  }
+  const iF = dur ? (p4 / dur) ** .25 : 0;
+  return { dur, iF, tss: dur * iF * iF / 36 };
+}
+function profile(w) {
+  const seg = segments(w), W = 1000, H = 100;
+  if (!seg.length) {
+    if (!w.hr_cap) return "";
+    return `<svg class="prof" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+      <rect x="0" y="${H * .45}" width="${W}" height="${H * .55}" fill="var(--z2)" opacity=".35"/>
+      <line x1="0" x2="${W}" y1="${H * .45}" y2="${H * .45}" stroke="var(--z2)" stroke-width="3" stroke-dasharray="12 8" vector-effect="non-scaling-stroke"/></svg>`;
+  }
+  const total = seg.reduce((a, s) => a + s.dur, 0), top = Math.max(1.25, ...seg.map(s => Math.max(s.f0, s.f1))) * 1.05;
+  const x = t => t / total * W, y = f => H - f / top * H;
+  const shapes = seg.map(s => `<polygon fill="${zoneColor(Math.max(s.f0, s.f1))}" points="${x(s.t0)},${H} ${x(s.t0)},${y(s.f0)} ${x(s.t0 + s.dur)},${y(s.f1)} ${x(s.t0 + s.dur)},${H}"/>`).join("");
+  return `<svg class="prof" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${shapes}
+    <line x1="0" x2="${W}" y1="${y(1)}" y2="${y(1)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 4" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function intervalTable(w) {
+  const seg = segments(w); if (!seg.length) return "";
+  // Merge identical consecutive steps for readability.
+  const rows = [];
+  for (const s of seg) {
+    const last = rows[rows.length - 1];
+    if (last && !s.ramp && !last.ramp && last.f1 === s.f1 && !s.note) { last.dur += s.dur; continue; }
+    rows.push({ ...s });
+  }
+  return `<table>${rows.map(s => {
+    const w0 = Math.round(s.f0 * ftp), w1 = Math.round(s.f1 * ftp);
+    const watts = s.ramp && w0 !== w1 ? `${w0}→${w1} W` : `${w1} W`;
+    const pct = s.ramp && w0 !== w1 ? `${Math.round(s.f0 * 100)}→${Math.round(s.f1 * 100)} %` : `${Math.round(s.f1 * 100)} %`;
+    return `<tr><td class="n">${mmss(s.t0)}</td><td class="n">${mmss(s.dur)}</td>
+      <td class="n"><span class="sw" style="background:${zoneColor(Math.max(s.f0, s.f1))}"></span>${watts}</td>
+      <td class="n">${pct}</td><td>${esc(s.note)}</td></tr>`;
+  }).join("")}</table>`;
+}
+
+// ---------- Render ----------
+function card(w, ride, today) {
+  const st = stats(w), key = w.id;
+  const bits = [];
+  if (st.dur) bits.push(hm(st.dur));
+  if (w.hr_cap) bits.push(`HR cap ${w.hr_cap}`);
+  if (st.tss != null) bits.push(`~${Math.round(st.tss)} TSS · IF ${st.iF.toFixed(2)}`);
+  if (!st.dur && !w.hr_cap) bits.push("Note");
+  let badge = "";
+  if (ride) badge = ride.completed === false ? `<span class="badge part">Stopped</span>` : `<span class="badge done">✓ Done</span>`;
+  else if (w.date < today && (st.dur || w.hr_cap)) badge = `<span class="badge miss">Not ridden</span>`;
+  const rideBox = ride ? `<div class="ride"><b>Ridden</b> ${new Date(ride.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·
+      ${hm(ride.duration_s)}${ride.tss != null ? ` · ${Math.round(ride.tss)} TSS` : ""}${ride.normalized_power ? ` · NP ${ride.normalized_power} W` : ""}
+      ${ride.intensity_factor ? ` · IF ${Number(ride.intensity_factor).toFixed(2)}` : ""}${ride.avg_hr ? ` · HR ${ride.avg_hr}` : ""}
+      ${ride.decoupling_pct != null ? ` · Pw:HR ${Number(ride.decoupling_pct).toFixed(1)} %` : ""}</div>` : "";
+  return `<div class="card${openCards.has(key) ? " open" : ""}" data-k="${esc(key)}">
+    <div class="t"><span>${esc(w.name)}</span>${badge}</div>
+    <div class="meta">${bits.join(" · ")}</div>
+    ${profile(w)}
+    <div class="detail">${rideBox}${w.note ? `<p class="note">${esc(w.note)}</p>` : ""}${intervalTable(w)}</div>
+  </div>`;
+}
+
+async function load() {
+  const start = addDays(monday(new Date()), -7 * weeksBack), end = addDays(monday(new Date()), 7 * weeksAhead);
+  app.innerHTML = `<div class="center">Loading…</div>`;
+  try {
+    const [ath, plan, rides] = await Promise.all([
+      rest("athlete?select=ftp"),
+      rest(`planned_workouts?select=id,date,name,note,intervals,hr_cap,duration_s&date=gte.${iso(start)}&date=lt.${iso(end)}&order=date,id`),
+      rest(`rides?select=id,started_at,name,duration_s,completed,plan_id,tss,intensity_factor,normalized_power,avg_hr,decoupling_pct&started_at=gte.${iso(addDays(start, -1))}&order=started_at`),
+    ]);
+    if (ath[0]?.ftp) ftp = ath[0].ftp;
+    render(start, end, plan, rides);
+  } catch (e) {
+    if (session) app.innerHTML = `<div class="center">Could not load: ${esc(e.message)}<br><br><button onclick="load()">Retry</button></div>`;
+  }
+}
+
+function render(start, end, plan, rides) {
+  const today = iso(new Date());
+  const byPlan = new Map(rides.filter(r => r.plan_id).map(r => [r.plan_id, r]));
+  const byDate = new Map();
+  for (const w of plan) { if (!byDate.has(w.date)) byDate.set(w.date, []); byDate.get(w.date).push(w); }
+  // Sort same-day sessions: "part 1" before "part 2", otherwise by name.
+  for (const l of byDate.values()) l.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+  let html = `<header><h1>Training <span class="sub">FTP ${ftp} W</span></h1>
+    <button id="rf" aria-label="Refresh">↻</button><button id="so">Sign out</button></header><main>`;
+  if (weeksBack < 8) html += `<button class="more" id="older">Show earlier weeks</button>`;
+  for (let wk = new Date(start); wk < end; wk = addDays(wk, 7)) {
+    let secs = 0, tss = 0, days = "";
+    for (let i = 0; i < 7; i++) {
+      const d = addDays(wk, i), ds = iso(d), list = byDate.get(ds) || [];
+      for (const w of list) { const s = stats(w); secs += s.dur; tss += s.tss || 0; }
+      days += `<div class="day${ds === today ? " today" : ""}"${ds === today ? ' id="today"' : ""}>
+        <div class="date"><div class="dow">${DOW[i]}</div><div class="dn">${d.getDate()}</div></div>
+        <div class="sessions">${list.length ? list.map(w => card(w, byPlan.get(w.id), today)).join("") : `<div class="rest">—</div>`}</div></div>`;
+    }
+    const last = addDays(wk, 6);
+    html += `<div class="week"><h2>W${weekNo(wk)} · ${wk.getDate()} ${MON[wk.getMonth()]} – ${last.getDate()} ${MON[last.getMonth()]}</h2>
+      <span class="tot">${secs ? `${hm(secs)}${tss ? ` · ~${Math.round(tss)} TSS` : ""}` : ""}</span></div>${days}`;
+  }
+  html += `<button class="more" id="newer">Show later weeks</button></main>`;
+  app.innerHTML = html;
+
+  app.querySelectorAll(".card").forEach(c => c.onclick = () => {
+    c.classList.toggle("open");
+    c.classList.contains("open") ? openCards.add(c.dataset.k) : openCards.delete(c.dataset.k);
+  });
+  document.getElementById("rf").onclick = load;
+  document.getElementById("so").onclick = signOut;
+  document.getElementById("newer").onclick = () => { weeksAhead += 4; load(); };
+  const older = document.getElementById("older");
+  if (older) older.onclick = () => { weeksBack += 4; load(); };
+  if (!scrolled) { scrolled = true; document.getElementById("today")?.scrollIntoView({ block: "center" }); }
+}
+
+// Reload when the app comes back to the foreground (e.g. after the coach changed the plan).
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && session) load(); });
+
+session = store.get();
+session ? load() : renderLogin();
+</script>
+</body>
+</html>
