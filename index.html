@@ -79,8 +79,8 @@ header .sub { flex: 1; text-align: right; padding-right: 4px; }
 .tabs button[aria-selected="true"] { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.15); }
 
 /* Fitness view */
-:root { --s1: #2a78d6; --ref: #9a9890; }
-@media (prefers-color-scheme: dark) { :root { --s1: #3987e5; --ref: #6f6d66; } }
+:root { --s1: #2a78d6; --s2: #eb6834; --ref: #9a9890; }
+@media (prefers-color-scheme: dark) { :root { --s1: #3987e5; --s2: #d95926; --ref: #6f6d66; } }
 .perf section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-top: 14px; }
 .perf h3 { margin: 0; font-size: 16px; }
 .perf section > .meta { margin: 2px 0 8px; }
@@ -124,6 +124,15 @@ header .sub { flex: 1; text-align: right; padding-right: 4px; }
 .rt th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 3px 4px; }
 .rt th.n { text-align: right; }
 .rt td.nm { max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grp { font-size: 17px; margin: 26px 0 0; }
+.grp .meta { font-weight: 400; font-size: 13px; }
+.chart .ln.s2 { stroke: var(--s2); }
+.chart .ln.k { stroke: var(--ink); stroke-width: 1.5; opacity: .85; }
+.chart .dot.k { fill: var(--ink); stroke: var(--card); stroke-width: 1.5; }
+.chart .dl { fill: var(--ink); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chart .band { opacity: .14; }
+.chart .bl { fill: var(--muted); font-size: 10px; }
+.f-tr { fill: #eda100; } .f-fr { fill: #2a78d6; } .f-gr { fill: #888; } .f-op { fill: #16a34a; } .f-hr { fill: #e34948; }
 .foot { font-size: 12px; color: var(--muted); margin-top: 16px; }
 </style>
 </head>
@@ -371,12 +380,14 @@ let perfData = null;
 async function loadPerf() {
   app.innerHTML = `<div class="center">Loading…</div>`;
   try {
-    const [ath, rides] = await Promise.all([
+    const [ath, rides, fit] = await Promise.all([
       rest("athlete?select=ftp,mass_kg"),
       rest("rides?select=id,started_at,name,duration_s,completed,ftp,tss,intensity_factor,normalized_power,avg_watts,avg_hr,efficiency,decoupling_pct,zones,power_curve&order=started_at"),
+      rest("daily_fitness?select=date,ctl,atl,ramp,load,eftp,resting_hr,hrv,sleep_s&order=date").catch(() => []),
     ]);
     if (ath[0]?.ftp) ftp = ath[0].ftp;
-    perfData = { mass: Number(ath[0]?.mass_kg) || null, rides: rides.map(r => ({ ...r, d: new Date(r.started_at) })) };
+    perfData = { mass: Number(ath[0]?.mass_kg) || null, rides: rides.map(r => ({ ...r, d: new Date(r.started_at) })),
+      fit: fit.map(f => { const [y, m, d] = f.date.split("-").map(Number); return { ...f, d: new Date(y, m - 1, d) }; }) };
     renderPerf();
   } catch (e) {
     if (session) app.innerHTML = `${headerHtml()}<div class="center">Could not load: ${esc(e.message)}<br><br><button onclick="load()">Retry</button></div>`, wireHeader();
@@ -384,9 +395,10 @@ async function loadPerf() {
 }
 
 function renderPerf() {
-  const { rides: all, mass } = perfData, range = ui.get("range") || "91";
-  const now = new Date(), from = range === "all" ? (all[0]?.d || now) : addDays(new Date(now.getFullYear(), now.getMonth(), now.getDate()), -Number(range) + 1);
-  const rides = all.filter(r => r.d >= from);
+  const { rides: all, mass, fit: fitAll } = perfData, range = ui.get("range") || "91";
+  const first = [all[0]?.d, fitAll[0]?.d].filter(Boolean).sort((a, b) => a - b)[0];
+  const now = new Date(), from = range === "all" ? (first || now) : addDays(new Date(now.getFullYear(), now.getMonth(), now.getDate()), -Number(range) + 1);
+  const rides = all.filter(r => r.d >= from), fit = fitAll.filter(f => f.d >= from);
 
   // Best power per duration (and which ride set it), in range and all-time.
   const best = list => {
@@ -403,6 +415,8 @@ function renderPerf() {
 
   let h = `${headerHtml()}<main class="perf">
     <div class="seg" role="group" aria-label="Date range">${RANGES.map(([v, l]) => `<button data-r="${v}" aria-pressed="${v === range}">${l}</button>`).join("")}</div>
+    ${fitnessHtml(fit)}
+    <h2 class="grp">Indoor rides <span class="meta">TrainerApp</span></h2>
     <div class="tiles">
       ${tile("Rides", rides.length)}
       ${tile("Time", secs ? hm(secs) : "–")}
@@ -418,11 +432,12 @@ function renderPerf() {
     h += section("Pw:HR decoupling", "HR drift in the 2nd half vs the 1st. Under 5 % = good aerobic durability (meaningful on steady rides).", `<div class="chart" id="c-dec"></div>`);
     h += section("Time in zones", "Power zones, % of FTP", zonesHtml(rides));
     h += section("Rides", "", ridesTable(rides));
-    h += `<p class="foot">Indoor TrainerApp rides only. Fitness/fatigue (CTL/ATL) and outdoor rides live in intervals.icu.</p></main>`;
+    h += `<p class="foot">Ride figures: indoor TrainerApp rides only. Fitness, fatigue, form, resting HR and HRV: all activities, copied from intervals.icu at each coach check-in${fitAll.length ? ` (last: ${dmy(fitAll[fitAll.length - 1].d)})` : ""}.</p></main>`;
   }
   app.innerHTML = h + `<div id="tip" role="tooltip"></div>`;
   wireHeader();
   app.querySelectorAll(".seg button").forEach(b => b.onclick = () => { ui.set("range", b.dataset.r); renderPerf(); });
+  if (fit.length) fitnessCharts(fit, from);
   if (!rides.length) return;
 
   const W = document.getElementById("c-curve").clientWidth;
@@ -430,6 +445,85 @@ function renderPerf() {
   loadChart(document.getElementById("c-load"), W, rides, from);
   dotChart(document.getElementById("c-ef"), W, rides.filter(r => r.efficiency > 0), from, r => Number(r.efficiency), v => v.toFixed(2), null);
   dotChart(document.getElementById("c-dec"), W, rides.filter(r => r.decoupling_pct != null), from, r => Number(r.decoupling_pct), v => `${v.toFixed(1)} %`, 5);
+}
+
+// ----- Fitness / fatigue / form (intervals.icu snapshot) -----
+const FORM_BANDS = [[25, 60, "Transition", "f-tr"], [5, 25, "Fresh", "f-fr"], [-10, 5, "Grey zone", "f-gr"], [-30, -10, "Optimal", "f-op"], [-80, -30, "High risk", "f-hr"]];
+const formOf = f => f.ctl != null && f.atl != null ? f.ctl - f.atl : null;
+const formZone = v => FORM_BANDS.find(([lo, hi]) => v >= lo && v < hi)?.[2] || "";
+const n1 = v => v == null ? "–" : (Math.round(v * 10) / 10).toString();
+
+function fitnessHtml(fit) {
+  if (!fit.length) return "";
+  const last = fit[fit.length - 1], form = formOf(last);
+  const sign = v => v == null ? "–" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(Math.round(v));
+  return `<div class="tiles">
+      ${tile("Fitness", Math.round(last.ctl), "CTL")}
+      ${tile("Fatigue", Math.round(last.atl), "ATL")}
+      ${tile("Form", sign(form), formZone(form))}
+      ${tile("Ramp", last.ramp == null ? "–" : (last.ramp > 0 ? "+" : "") + n1(last.ramp), "CTL change / week")}
+    </div>`
+    + section("Fitness & fatigue", "Training load from all activities (intervals.icu)",
+      `<div class="chart" id="c-pmc"></div>${legend([["var(--s1)", "Fitness (CTL)"], ["var(--s2)", "Fatigue (ATL)"]])}`)
+    + section("Form", "Fitness − fatigue. Optimal training zone is −10 to −30.", `<div class="chart" id="c-form"></div>`)
+    + (fit.some(f => f.resting_hr) ? section("Resting heart rate", "bpm, from Garmin. A rise of 5+ bpm = back off.", `<div class="chart" id="c-rhr"></div>`) : "")
+    + (fit.some(f => f.hrv) ? section("HRV", "ms, from Garmin. Higher = better recovered.", `<div class="chart" id="c-hrv"></div>`) : "");
+}
+
+function fitnessCharts(fit, from) {
+  const W = document.getElementById("c-pmc").clientWidth;
+  const tipDay = f => { const fm = formOf(f);
+    return `<b>${dmy(f.d)}</b><br>Fitness ${n1(f.ctl)} · Fatigue ${n1(f.atl)}<br>Form ${n1(fm)} <span class="meta">${formZone(fm)}</span>`
+      + `${f.load ? `<br>Load ${Math.round(f.load)}` : ""}${f.ramp != null ? ` · Ramp ${n1(f.ramp)}` : ""}`; };
+  timeChart(document.getElementById("c-pmc"), W, 190, fit, from,
+    [{ v: f => f.ctl, cls: "s1", lab: "CTL" }, { v: f => f.atl, cls: "s2", lab: "ATL" }], { zero: true, tip: tipDay });
+  timeChart(document.getElementById("c-form"), W, 150, fit, from,
+    [{ v: formOf, cls: "k", lab: "" }], { zero: true, bands: FORM_BANDS, tip: tipDay });
+  const rhr = document.getElementById("c-rhr"), hrv = document.getElementById("c-hrv");
+  if (rhr) timeChart(rhr, W, 130, fit.filter(f => f.resting_hr), from, [{ v: f => f.resting_hr, cls: "k", lab: "" }], { dots: true,
+    tip: f => `<b>${dmy(f.d)}</b><br>Resting HR ${f.resting_hr} bpm` });
+  if (hrv) timeChart(hrv, W, 130, fit.filter(f => f.hrv), from, [{ v: f => Number(f.hrv), cls: "k", lab: "" }], { dots: true,
+    tip: f => `<b>${dmy(f.d)}</b><br>HRV ${Math.round(f.hrv)} ms` });
+}
+
+// Time-series line chart. series: [{v(row), cls, lab}] — all on one y-axis.
+function timeChart(el, W, H, rows, from, series, o = {}) {
+  if (!rows.length) { el.innerHTML = `<p class="meta">No data.</p>`; return; }
+  const vals = rows.flatMap(r => series.map(s => s.v(r))).filter(v => v != null);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (o.zero) { lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+  if (!o.zero) { const p = (hi - lo) * .15 || 2; lo -= p; hi += p; }
+  const yt = niceTicks(lo, hi);
+  const right = series.some(s => s.lab) ? 34 : PAD.r;
+  const t0 = +from, t1 = Math.max(+rows[rows.length - 1].d, t0 + 864e5);
+  const x = t => PAD.l + 4 + (t - t0) / (t1 - t0) * (W - PAD.l - right - 4);
+  const y0 = yt[0], y1 = yt[yt.length - 1], y = v => PAD.t + (1 - (v - y0) / (y1 - y0)) * (H - PAD.t - PAD.b);
+  const n = Math.max(2, Math.floor((W - PAD.l) / 70));
+  const xt = Array.from({ length: n }, (_, i) => { const t = t0 + (t1 - t0) * i / (n - 1); return [x(t), dmy(new Date(t))]; });
+  const bands = (o.bands || []).map(([a, b, lab, cls]) => {
+    const top = y(Math.min(b, y1)), bot = y(Math.max(a, y0));
+    if (bot - top < 1) return "";
+    return `<rect class="band ${cls}" x="${PAD.l}" width="${W - PAD.l - PAD.r}" y="${top}" height="${bot - top}"/>`
+      + (bot - top > 13 ? `<text class="bl" x="${PAD.l + 4}" y="${top + 12}">${lab}</text>` : "");
+  }).join("");
+  // End-of-line value labels, nudged apart when they would collide.
+  const labs = series.map(s => { const last = [...rows].reverse().find(r => s.v(r) != null);
+    return s.lab && last ? { x: x(+last.d) + 6, y: y(s.v(last)) + 4, t: Math.round(s.v(last)) } : null; });
+  const ls = labs.filter(Boolean).sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ls.length; i++) if (ls[i].y - ls[i - 1].y < 13) { const m = (ls[i].y + ls[i - 1].y) / 2; ls[i - 1].y = m - 6.5; ls[i].y = m + 6.5; }
+  const lines = series.map((s, si) => {
+    let d = "", pen = false;
+    for (const r of rows) { const v = s.v(r); if (v == null) { pen = false; continue; }
+      d += `${pen ? "L" : "M"}${x(+r.d).toFixed(1)},${y(v).toFixed(1)}`; pen = true; }
+    const dots = o.dots ? rows.map(r => s.v(r) == null ? "" : `<circle class="dot ${s.cls}" cx="${x(+r.d)}" cy="${y(s.v(r))}" r="3"/>`).join("") : "";
+    const L = labs[si], lab = L ? `<text class="dl ${s.cls}" x="${L.x}" y="${L.y}">${L.t}</text>` : "";
+    return `<path class="ln ${s.cls}" d="${d}"/>${dots}${lab}`;
+  }).join("");
+  const zero = o.zero && y0 < 0 ? `<line class="refl" x1="${PAD.l}" x2="${W - PAD.r}" y1="${y(0)}" y2="${y(0)}"/>` : "";
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img">${bands}
+    ${frame(W, H, yt, y, v => v, xt)}${zero}${lines}<g class="hl"></g></svg>`;
+  attachHover(el, el.querySelector("svg"), H, rows.map(r => ({ x: x(+r.d),
+    ys: series.map(s => s.v(r)).filter(v => v != null).map(y), html: o.tip(r) })), "line");
 }
 
 const tile = (label, value, sub = "") => `<div class="tile"><div class="tl">${label}</div><div class="tv">${value}</div>${sub ? `<div class="ts">${sub}</div>` : ""}</div>`;
