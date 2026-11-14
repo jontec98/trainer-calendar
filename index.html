@@ -223,7 +223,7 @@ function segments(w) {
   let t = 0, prev = .5; const out = [];
   for (const iv of w.intervals) {
     const f1 = frac(Number(iv.power) || 0), f0 = iv.type === "ramp" ? prev : f1, dur = Number(iv.duration) || 0;
-    out.push({ t0: t, dur, f0, f1, note: iv.note || "", ramp: iv.type === "ramp" });
+    out.push({ t0: t, dur, f0, f1, note: iv.note || "", ramp: iv.type === "ramp", cad: Number(iv.cadence) || null });
     t += dur; prev = f1;
   }
   return out;
@@ -260,7 +260,7 @@ function intervalTable(w) {
   const rows = [];
   for (const s of seg) {
     const last = rows[rows.length - 1];
-    if (last && !s.ramp && !last.ramp && last.f1 === s.f1 && !s.note) { last.dur += s.dur; continue; }
+    if (last && !s.ramp && !last.ramp && last.f1 === s.f1 && last.cad === s.cad && !s.note) { last.dur += s.dur; continue; }
     rows.push({ ...s });
   }
   return `<table>${rows.map(s => {
@@ -269,7 +269,7 @@ function intervalTable(w) {
     const pct = s.ramp && w0 !== w1 ? `${Math.round(s.f0 * 100)}→${Math.round(s.f1 * 100)} %` : `${Math.round(s.f1 * 100)} %`;
     return `<tr><td class="n">${mmss(s.t0)}</td><td class="n">${mmss(s.dur)}</td>
       <td class="n"><span class="sw" style="background:${zoneColor(Math.max(s.f0, s.f1))}"></span>${watts}</td>
-      <td class="n">${pct}</td><td>${esc(s.note)}</td></tr>`;
+      <td class="n">${pct}</td><td class="n">${s.cad ? `${s.cad} rpm` : ""}</td><td>${esc(s.note)}</td></tr>`;
   }).join("")}</table>`;
 }
 
