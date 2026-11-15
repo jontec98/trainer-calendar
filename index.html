@@ -54,6 +54,7 @@ main { max-width: 680px; margin: 0 auto; padding: 8px 16px 40px; }
 .badge.done { color: var(--done); border: 1px solid var(--done); }
 .badge.part { color: var(--z5); border: 1px solid var(--z5); }
 .badge.miss { color: var(--miss); border: 1px solid var(--miss); }
+.out { font-size: 13px; color: var(--muted); padding: 2px 2px 0; }
 svg.prof { display: block; width: 100%; height: 44px; margin-top: 8px; }
 .detail { display: none; margin-top: 10px; font-size: 14px; }
 .card.open .detail { display: block; }
@@ -274,7 +275,7 @@ function intervalTable(w) {
 }
 
 // ---------- Render ----------
-function card(w, ride, today) {
+function card(w, ride, today, outside) {
   const st = stats(w), key = w.id;
   const bits = [];
   if (st.dur) bits.push(hm(st.dur));
@@ -283,7 +284,9 @@ function card(w, ride, today) {
   if (!st.dur && !w.hr_cap) bits.push("Note");
   let badge = "";
   if (ride) badge = ride.completed === false ? `<span class="badge part">Stopped</span>` : `<span class="badge done">✓ Done</span>`;
+  else if (outside) badge = `<span class="badge done">✓ Done outside</span>`;
   else if (w.date < today && (st.dur || w.hr_cap)) badge = `<span class="badge miss">Not ridden</span>`;
+  const outBox = !ride && outside ? `<div class="ride"><b>Ridden outside</b> ${outLine(outside)}</div>` : "";
   const rideBox = ride ? `<div class="ride"><b>Ridden</b> ${new Date(ride.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} ·
       ${hm(ride.duration_s)}${ride.tss != null ? ` · ${Math.round(ride.tss)} TSS` : ""}${ride.normalized_power ? ` · NP ${ride.normalized_power} W` : ""}
       ${ride.intensity_factor ? ` · IF ${Number(ride.intensity_factor).toFixed(2)}` : ""}${ride.avg_hr ? ` · HR ${ride.avg_hr}` : ""}
@@ -292,8 +295,15 @@ function card(w, ride, today) {
     <div class="t"><span>${esc(w.name)}</span>${badge}</div>
     <div class="meta">${bits.join(" · ")}</div>
     ${profile(w)}
-    <div class="detail">${rideBox}${w.note ? `<p class="note">${esc(w.note)}</p>` : ""}${intervalTable(w)}</div>
+    <div class="detail">${rideBox}${outBox}${w.note ? `<p class="note">${esc(w.note)}</p>` : ""}${intervalTable(w)}</div>
   </div>`;
+}
+
+const outType = a => ({ Ride: "🚴", GravelRide: "🚴", MountainBikeRide: "🚵", Run: "🏃", Walk: "🚶", Hike: "🥾" }[a.type] || "•");
+function outLine(a) {
+  return `${a.start_local ? a.start_local.slice(11, 16) + " · " : ""}${esc(a.name || a.type || "Activity")} · ${hm(a.moving_s || 0)}` +
+    `${a.distance_m ? ` · ${(a.distance_m / 1000).toFixed(1)} km` : ""}${a.avg_hr ? ` · HR ${a.avg_hr}` : ""}` +
+    `${a.load != null ? ` · load ${Math.round(a.load)}` : ""}`;
 }
 
 async function load() {
@@ -301,25 +311,39 @@ async function load() {
   const start = addDays(monday(new Date()), -7 * weeksBack), end = addDays(monday(new Date()), 7 * weeksAhead);
   app.innerHTML = `<div class="center">Loading…</div>`;
   try {
-    const [ath, plan, rides] = await Promise.all([
+    const [ath, plan, rides, outs] = await Promise.all([
       rest("athlete?select=ftp"),
       rest(`planned_workouts?select=id,date,name,note,intervals,hr_cap,duration_s&date=gte.${iso(start)}&date=lt.${iso(end)}&order=date,id`),
       rest(`rides?select=id,started_at,name,duration_s,completed,plan_id,tss,intensity_factor,normalized_power,avg_hr,decoupling_pct&started_at=gte.${iso(addDays(start, -1))}&order=started_at`),
+      rest(`outdoor_activities?select=id,date,start_local,type,name,moving_s,distance_m,load,avg_hr&date=gte.${iso(start)}&date=lt.${iso(end)}&order=start_local`).catch(() => []),
     ]);
     if (ath[0]?.ftp) ftp = ath[0].ftp;
-    render(start, end, plan, rides);
+    render(start, end, plan, rides, outs);
   } catch (e) {
     if (session) app.innerHTML = `<div class="center">Could not load: ${esc(e.message)}<br><br><button onclick="load()">Retry</button></div>`;
   }
 }
 
-function render(start, end, plan, rides) {
+function render(start, end, plan, rides, outs = []) {
   const today = iso(new Date());
   const byPlan = new Map(rides.filter(r => r.plan_id).map(r => [r.plan_id, r]));
   const byDate = new Map();
   for (const w of plan) { if (!byDate.has(w.date)) byDate.set(w.date, []); byDate.get(w.date).push(w); }
   // Sort same-day sessions: "part 1" before "part 2", otherwise by name.
   for (const l of byDate.values()) l.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const outByDate = new Map();
+  for (const a of outs) { if (!outByDate.has(a.date)) outByDate.set(a.date, []); outByDate.get(a.date).push(a); }
+  // A planned session with no app ride counts as "done outside" if that day has an outdoor ride of at
+  // least 75 % of the planned duration (so a 30-min commute doesn't tick off a 60-min session).
+  const outsideFor = (w, used) => {
+    if (byPlan.has(w.id)) return null;
+    const need = 0.75 * (stats(w).dur || 0);
+    if (!need) return null;
+    const a = (outByDate.get(w.date) || []).filter(a => /Ride$/.test(a.type || "") && !used.has(a.id) && (a.moving_s || 0) >= need)
+      .sort((x, y) => (y.moving_s || 0) - (x.moving_s || 0))[0];
+    if (a) used.add(a.id);
+    return a || null;
+  };
 
   let html = `${headerHtml()}<main>`;
   if (weeksBack < 8) html += `<button class="more" id="older">Show earlier weeks</button>`;
@@ -327,10 +351,16 @@ function render(start, end, plan, rides) {
     let secs = 0, tss = 0, days = "";
     for (let i = 0; i < 7; i++) {
       const d = addDays(wk, i), ds = iso(d), list = byDate.get(ds) || [];
+      const dayHtml = (list, dayOuts) => {
+        const used = new Set();
+        const cards = list.map(w => card(w, byPlan.get(w.id), today, outsideFor(w, used))).join("");
+        const extra = dayOuts.filter(a => !used.has(a.id)).map(a => `<div class="out">${outType(a)} ${outLine(a)}</div>`).join("");
+        return cards + extra || `<div class="rest">—</div>`;
+      };
       for (const w of list) { const s = stats(w); secs += s.dur; tss += s.tss || 0; }
       days += `<div class="day${ds === today ? " today" : ""}"${ds === today ? ' id="today"' : ""}>
         <div class="date"><div class="dow">${DOW[i]}</div><div class="dn">${d.getDate()}</div></div>
-        <div class="sessions">${list.length ? list.map(w => card(w, byPlan.get(w.id), today)).join("") : `<div class="rest">—</div>`}</div></div>`;
+        <div class="sessions">${dayHtml(list, outByDate.get(ds) || [])}</div></div>`;
     }
     const last = addDays(wk, 6);
     html += `<div class="week"><h2>W${weekNo(wk)} · ${wk.getDate()} ${MON[wk.getMonth()]} – ${last.getDate()} ${MON[last.getMonth()]}</h2>
